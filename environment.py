@@ -14,7 +14,6 @@ n_snap = 0
 # Manually places the window
 os.environ["SDL_VIDEO_WINDOW_POS"] = "%d,%d" % (50, 50)
 
-STATE_SPACE = 13
 ACTION_SPACE = 4
 
 MAX_FRAME = 250
@@ -54,10 +53,11 @@ class Game:
         self.clock = pg.time.Clock()
 
         pg.display.set_caption(const.TITLE)
+                
+        self.agent = Block(0, 0, const.BLOCK_SIZE, const.BLOCK_SIZE, pg.Color("Blue"))
+        self.food = Block(0, 0, const.BLOCK_SIZE, const.BLOCK_SIZE, pg.Color("Green"))
 
         self.running = True
-        self.state_space = STATE_SPACE
-        self.action_space = ACTION_SPACE
         self.n_games = 0
         self.n_frames_threshold = 0
         self.score = 0
@@ -68,64 +68,38 @@ class Game:
         self.mean_rewards = [0]
         self.reward_episode = 0
 
-        self.player = Block(0, 0, const.BLOCK_SIZE, const.BLOCK_SIZE, pg.Color("Blue"))
-        self.food = Block(0, 0, const.BLOCK_SIZE, const.BLOCK_SIZE, pg.Color("Green"))
-        self.enemies = [
-            # Block(
-            #     (const.INFO_WIDTH + const.PLAY_WIDTH) // 2 - const.BLOCK_SIZE // 2,
-            #     const.PLAY_HEIGHT // 2,
-            #     const.BLOCK_SIZE * 1,
-            #     const.BLOCK_SIZE * 9,
-            #     pg.Color("Red"),
-            # ),
-        ]
-
-        self.place_player()
-        self.place_food()
-
         self.direction = None
         self.dangerous_locations = set()
-        self.distance_food = distance(self.player.pos, self.food.pos)
+        self.distance_food = distance(self.agent.pos, self.food.pos)
+        
+        self.state_space = len(self.get_state())
+        self.action_space = ACTION_SPACE
 
     def random_coordinates(self):
-        idx_x = random.randint(
-            1, ((const.PLAY_WIDTH - const.INFO_WIDTH) // const.BLOCK_SIZE) - 1
-        )
-        idx_y = random.randint(1, (const.PLAY_HEIGHT // const.BLOCK_SIZE) - 1)
-        x = const.INFO_WIDTH + idx_x * const.BLOCK_SIZE
-        y = idx_y * const.BLOCK_SIZE
+        idx_x = random.randint(0, const.PLAY_WIDTH // const.BLOCK_SIZE - 1)
+        idx_y = random.randint(0, const.PLAY_HEIGHT // const.BLOCK_SIZE - 1)
+
+        x = const.BLOCK_SIZE * (idx_x + 0.5)
+        y = const.BLOCK_SIZE * (idx_y + 0.5)
         
         return x, y
-
-    def place_player(self):
+    
+    def place_entity(self, entity, other):
         x, y = self.random_coordinates()
-
-        self.player.pos = vec(x, y)
-        self.player.rect.center = self.player.pos
+        entity.pos = vec(x, y)
+        entity.rect.center = entity.pos
         
-        obstacles = [enemy.rect for enemy in self.enemies] + [self.food.rect]
-        if self.player.rect.collidelist(obstacles) != -1:
-            self.place_player()
-
-    def place_food(self):
-        x, y = self.random_coordinates()
-
-        self.food.pos = vec(x, y)
-        self.food.rect.center = self.food.pos
-
-        # Checking for potential collisions with other entities
-        obstacles = [enemy.rect for enemy in self.enemies] + [self.player.rect]
-        if self.food.rect.collidelist(obstacles) != -1:
-            self.place_food()
-
+        if entity.rect.colliderect(other.rect):
+            self.place_entity(entity, other)
+        
     def reset(self) -> np.array:
         """Resets the game and return its corresponding state."""
         self.score = 0
         self.n_frames_threshold = 0
         self.reward_episode = 0
         self.dangerous_locations.clear()
-        self.place_player()
-        self.place_food()
+        self.place_entity(self.agent, other=self.food)
+        self.place_entity(self.food, other=self.agent)
 
         return self.get_state()
 
@@ -136,34 +110,18 @@ class Game:
         args:
             action (int, required): action chosen by the human/agent to move the player
         """
-
-        if self.human:
-            keys = pg.key.get_pressed()  # Keyboard events
-            if keys[pg.K_RIGHT]:
-                self.direction = "right"
-                self.player.pos.x += const.AGENT_X_SPEED
-            elif keys[pg.K_LEFT]:
-                self.direction = "left"
-                self.player.pos.x += -const.AGENT_X_SPEED
-            elif keys[pg.K_UP]:
-                self.direction = "up"
-                self.player.pos.y += -const.AGENT_Y_SPEED
-            elif keys[pg.K_DOWN]:
-                self.direction = "down"
-                self.player.pos.y += const.AGENT_Y_SPEED
-        else:
-            self.direction = MOVES[action]
-            if self.direction == "right":  # going right
-                self.player.pos.x += const.AGENT_X_SPEED
-            elif self.direction == "left":  # going left
-                self.player.pos.x += -const.AGENT_X_SPEED
-            elif self.direction == "up":  # going down
-                self.player.pos.y += -const.AGENT_Y_SPEED
-            elif self.direction == "down":  # going up
-                self.player.pos.y += const.AGENT_Y_SPEED
+        self.direction = MOVES[action]
+        if self.direction == "right":  # going right
+            self.agent.pos.x += const.AGENT_X_SPEED
+        elif self.direction == "left":  # going left
+            self.agent.pos.x += -const.AGENT_X_SPEED
+        elif self.direction == "up":  # going down
+            self.agent.pos.y += -const.AGENT_Y_SPEED
+        elif self.direction == "down":  # going up
+            self.agent.pos.y += const.AGENT_Y_SPEED
 
         # Updating pos
-        self.player.rect.center = self.player.pos
+        self.agent.rect.center = self.agent.pos
 
     def step(self, action):
         self.n_frames_threshold += 1
@@ -177,14 +135,13 @@ class Game:
         return state, reward, done
 
     def get_state(self) -> np.array:
-
-        r_player, r_food = self.player.rect, self.food.rect
+        r_player, r_food = self.agent.rect, self.food.rect
         state = [
                 # current direction
-                self.direction == "right",
-                self.direction == "left",
-                self.direction == "down",
-                self.direction == "up",
+                # self.direction == "right",
+                # self.direction == "left",
+                # self.direction == "down",
+                # self.direction == "up",
                 # food relative position
                 r_player.right <= r_food.left,  # food is right
                 r_player.left >= r_food.right,  # food is left
@@ -193,8 +150,6 @@ class Game:
                 # dangers
                 self.wall_collision(offset=const.BLOCK_SIZE),
             ]
-        enemy_dangers = self.enemy_danger()
-        state.extend(enemy_dangers)
         
         return np.array(state, dtype=np.float32)
 
@@ -207,59 +162,35 @@ class Game:
             return PENALTY_WANDER, True
 
         # checking for failure (wall or enemy collision)
-        if self.wall_collision(offset=0) or self.enemy_collision():
+        if self.wall_collision(offset=0):
             return PENALTY_COLLISION, True
 
         # checking if player is getting closer to food
         self.old_distance_food = self.distance_food
-        self.distance_food = distance(self.player.pos, self.food.pos)
+        self.distance_food = distance(self.agent.pos, self.food.pos)
         if self.distance_food < self.old_distance_food:
             reward = REWARD_CLOSE_FOOD
-
-        # checking for any enemy nearby and tag its location as dangerous
-        if any(self.enemy_danger()):
-            if self.player.rect.center not in self.dangerous_locations:
-                self.dangerous_locations.add(self.player.rect.center)
-                reward = 1
-            else:
-                reward = -1
 
         # checking if eat:
         if self.food_collision():
             self.score += 1
             self.n_frames_threshold = 0
-            self.place_food()
+            self.place_entity(self.food, other=self.agent)
             reward = REWARD_EAT
 
         return reward, done
 
     def wall_collision(self, offset):
-        r = self.player.rect
+        r = self.agent.rect
         return (
-            r.left - offset < const.INFO_WIDTH
+            r.left - offset < 0
             or r.right + offset > const.PLAY_WIDTH
             or r.top - offset < 0
             or r.bottom + offset > const.PLAY_HEIGHT
         )
-
-    def enemy_collision(self):
-        return bool(pg.sprite.spritecollide(self.player, self.enemies, False))
     
-    def enemy_danger(self):
-        # checking left, right, up and down
-        offsets = [(-1, 0), (1, 0), (0, -1), (0, 1)]
-        dangers = [0] * self.action_space
-
-        for enemy in self.enemies:
-            for count, offset in enumerate(offsets):
-                buffer_r = self.player.rect.copy().move(offset)
-                if buffer_r.colliderect(enemy.rect):
-                    dangers[count] = 1
-
-        return dangers
-
     def food_collision(self):
-        return self.player.rect.colliderect(self.food.rect)
+        return self.agent.rect.colliderect(self.food.rect)
 
     def events(self):
         for event in pg.event.get():
@@ -287,11 +218,8 @@ class Game:
 
     def draw_entities(self):
         """TODO"""
-        self.player.draw(self.screen)
+        self.agent.draw(self.screen)
         self.food.draw(self.screen)
-
-        for enemy in self.enemies:
-            enemy.draw(self.screen)
 
     def draw_grid(self):
         """TODO"""
@@ -306,60 +234,6 @@ class Game:
 
             pg.draw.line(self.screen, const.GRID_COLOR, p_v1, p_v2)
             pg.draw.line(self.screen, const.GRID_COLOR, p_h1, p_h2)
-
-    def draw_infos(self):
-        """Draws game informations"""
-
-        if self.score > self.highest_score:
-            self.highest_score = self.score
-
-        perc_exploration = (
-            self.agent.n_exploration
-            / (self.agent.n_exploration + self.agent.n_exploitation)
-            * 100
-        )
-        perc_exploitation = (
-            self.agent.n_exploitation
-            / (self.agent.n_exploration + self.agent.n_exploitation)
-            * 100
-        )
-        perc_threshold = int((self.n_frames_threshold / MAX_FRAME) * 100)
-
-        infos = [
-            f"Game: {self.n_games}",
-            f"Reward game: {round(self.reward_episode, 1)}",
-            f"Mean reward: {round(self.mean_rewards[-1], 1)}",
-            f"Score: {self.score}",
-            f"Highest score: {self.highest_score}",
-            f"Mean score: {round(self.mean_scores[-1], 1)}",
-            f"Initial Epsilon: {self.agent.max_epsilon}",
-            f"Epsilon: {round(self.agent.epsilon, 4)}",
-            f"Exploration: {round(perc_exploration, 3)}%",
-            f"Exploitation: {round(perc_exploitation, 3)}%",
-            f"Last decision: {self.agent.last_decision}",
-            f"Threshold: {perc_threshold}%",
-            f"Time: {int(pg.time.get_ticks() / 1e3)}s",
-            f"FPS: {int(self.clock.get_fps())}",
-        ]
-
-        # Drawing infos
-        for i, info in enumerate(infos):
-            message(
-                self.screen,
-                info,
-                const.INFOS_SIZE,
-                const.INFOS_COLOR,
-                (5, 5 + i * const.Y_OFFSET_INFOS),
-            )
-
-        # sep line
-        pg.draw.line(
-            self.screen,
-            const.SEP_LINE_COLOR,
-            (const.INFO_WIDTH, 0),
-            (const.INFO_WIDTH, const.INFO_HEIGHT),
-        )
-
 
 def set_global_seed(seed: int) -> None:
     """
