@@ -1,53 +1,66 @@
+import random
 import numpy as np
+
 from agent import Agent
 from environment import Game
 
-if __name__ == "__main__":
-    env = Game(human=False, grid=True, infos=False)
-    agent = Agent(
-        gamma=0.99,
-        epsilon=1.0,
-        batch_size=64,
-        n_actions=env.action_space,
-        eps_end=0.01,
-        input_dims=[env.state_space],
-        lr=0.001,
-    )
+def epsilon_greedy_policy(env, epsilon):
+    if random.uniform(0, 1) > epsilon:
+        return np.argmax(env.q_table[env.get_state()])
+    return random.randint(0, 3)
 
-    scores = []
-    eps_history = []
-    episode = 1
+def train(
+    env, 
+    n_episodes, 
+    min_epsilon, max_epsilon, 
+    learning_rate, decay_rate, gamma) -> np.ndarray:
+    """_summary_
 
-    while env.running:
-        score = 0
-        done = False
+    Args:
+        env (_type_): _description_
+        n_episodes (_type_): _description_
+        min_epsilon (_type_): _description_
+        max_epsilon (_type_): _description_
+        learning_rate (_type_): _description_
+        decay_rate (_type_): _description_
+        gamma (_type_): _description_
+
+    Returns:
+        np.ndarray: _description_
+    """
+    for episode in range(n_episodes):
+        # decay
+        epsilon = min_epsilon + (max_epsilon - min_epsilon)*np.exp(-decay_rate*episode)
         state = env.reset()
-
+        done = False
+        
         while not done:
-            if not env.running:
-                break
-            
-            env.render()
-            action = agent.choose_action(state)
+            # get action
+            action = epsilon_greedy_policy(env, epsilon)
+            # get new state, reward and possible stop
             new_state, reward, done = env.step(action)
-            
-            score += reward
-            agent.store_transitions(state, action, reward, new_state, done)
-            agent.learn()
+            # update QTable
+            print(env.q_table)
+            print(state, action)
+            env.q_table[state][action] = (
+                env.q_table[state][action] 
+                + learning_rate 
+                * (reward + gamma * np.max(env.q_table[new_state]) - env.q_table[state][action])
+            )
+            if done:
+                break
+    return env.q_table
 
-            state = new_state
-            scores.append(score)
-            eps_history.append(agent.epsilon)
 
+if __name__ == '__main__':
+    env = Game()
+    n_episodes = 1_000 
+    min_epsilon = 0.05
+    max_epsilon = 0.95
+    learning_rate = 1e-6
+    decay_rate = 0.01
+    gamma = 0.9
 
-        score = round(score, 1)
-        scores.append(score)
-        eps = round(agent.epsilon, 2)
-        eps_history.append(agent.epsilon)
-
-        avg_score = round(np.mean(scores[-100:]), 1)
-        episode += 1
-
-        print(
-            f"Episode: {episode}, score: {score}, average score: {avg_score}, epsilon: {eps}, last decision: {agent.last_decision}"
-        )
+    QTable = train(
+        env, n_episodes, min_epsilon, max_epsilon, learning_rate, decay_rate, gamma
+    )

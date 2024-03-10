@@ -46,7 +46,6 @@ class Block(pg.sprite.Sprite):
 class Game:
     def __init__(self, human=False, grid=False, infos=True) -> None:
         pg.init()
-        self.human = human
         self.grid = grid
         self.infos = infos
         self.screen = pg.display.set_mode([const.PLAY_WIDTH, const.PLAY_HEIGHT])
@@ -59,22 +58,11 @@ class Game:
 
         self.running = True
         self.n_games = 0
-        self.n_frames_threshold = 0
-        self.score = 0
-        self.highest_score = 0
-        self.sum_scores = 0
-        self.sum_rewards = 0
-        self.mean_scores = [0]
-        self.mean_rewards = [0]
-        self.reward_episode = 0
-
-        self.direction = None
-        self.dangerous_locations = set()
+        self.max_step = 0
+ 
         self.distance_food = distance(self.agent.pos, self.food.pos)
-        
-        self.state_space = len(self.get_state())
-        self.action_space = ACTION_SPACE
-
+        self.q_table = np.zeros((3, 4))
+                
     def random_coordinates(self):
         idx_x = random.randint(0, const.PLAY_WIDTH // const.BLOCK_SIZE - 1)
         idx_y = random.randint(0, const.PLAY_HEIGHT // const.BLOCK_SIZE - 1)
@@ -94,10 +82,7 @@ class Game:
         
     def reset(self) -> np.array:
         """Resets the game and return its corresponding state."""
-        self.score = 0
-        self.n_frames_threshold = 0
-        self.reward_episode = 0
-        self.dangerous_locations.clear()
+        self.max_step = 0
         self.place_entity(self.agent, other=self.food)
         self.place_entity(self.food, other=self.agent)
 
@@ -124,7 +109,7 @@ class Game:
         self.agent.rect.center = self.agent.pos
 
     def step(self, action):
-        self.n_frames_threshold += 1
+        self.max_step += 1
 
         self.events()
         self.move(action)
@@ -137,11 +122,6 @@ class Game:
     def get_state(self) -> np.array:
         r_player, r_food = self.agent.rect, self.food.rect
         state = [
-                # current direction
-                # self.direction == "right",
-                # self.direction == "left",
-                # self.direction == "down",
-                # self.direction == "up",
                 # food relative position
                 r_player.right <= r_food.left,  # food is right
                 r_player.left >= r_food.right,  # food is left
@@ -158,7 +138,7 @@ class Game:
         reward = 0
 
         # stops episode if the player does nothing but wonder around
-        if self.n_frames_threshold > MAX_FRAME:
+        if self.max_step > MAX_FRAME:
             return PENALTY_WANDER, True
 
         # checking for failure (wall or enemy collision)
@@ -173,8 +153,7 @@ class Game:
 
         # checking if eat:
         if self.food_collision():
-            self.score += 1
-            self.n_frames_threshold = 0
+            self.max_step = 0
             self.place_entity(self.food, other=self.agent)
             reward = REWARD_EAT
 
@@ -209,10 +188,7 @@ class Game:
 
         if self.grid:
             self.draw_grid()
-
-        if self.infos:
-            self.draw_infos()
-
+            
         pg.display.flip()
         self.clock.tick(const.FPS)
 
